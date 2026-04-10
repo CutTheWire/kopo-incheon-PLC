@@ -27,27 +27,35 @@ jobs:
         with:
           tag_name: ${{ steps.tag.outputs.version }}
           release_name: Release ${{ steps.tag.outputs.version }}
+          body: |
+            # 사용 방법
+            
+            아래 실행 파일의 이름으로 설정된 확장자 파일을 다운로드, 적합한 구동 프로그램이 사전에 설치된 상태로 구동.
+            
+            ## HMI
+            - 실행 파일 : 신호등.xpd
+            - 구동 프로그램 : XP-Builder
+            
+            ## PLC
+            - 실행 파일 : 신호등.xgwx
+            - 구동 프로그램 : XG-5000
           draft: false
           prerelease: false
 
-      - name: Upload HMI XPD files
+      - name: Upload HMI XPD file
         run: |
-          for file in HMI/*.xpd; do
-            if [ -f "$file" ]; then
-              gh release upload ${{ steps.tag.outputs.version }} "$file"
-            fi
-          done
+          if [ -f "HMI/신호등.xpd" ]; then
+            gh release upload ${{ steps.tag.outputs.version }} "HMI/신호등.xpd"
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
 
-      - name: Upload PLC XGWX files
+      - name: Upload PLC XGWX file
         run: |
-          for file in PLC/*.xgwx; do
-            if [ -f "$file" ]; then
-              gh release upload ${{ steps.tag.outputs.version }} "$file"
-            fi
-          done
+          if [ -f "PLC/신호등.xgwx" ]; then
+            gh release upload ${{ steps.tag.outputs.version }} "PLC/신호등.xgwx"
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
