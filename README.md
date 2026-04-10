@@ -1,4 +1,4 @@
-# kopo-incheon--PLC
+# kopo incheon PLC
 > 사거리 신호등 제어
 ## 주의 사항
 - 해당 리포지토리는 .xpd와 .xgwx를 저장하는 저장소로, Git Branch 개발 방식에 의거한 git push를 금지한다.
