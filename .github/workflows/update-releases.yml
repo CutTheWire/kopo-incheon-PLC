@@ -34,12 +34,12 @@ jobs:
             
             ## HMI
             - 실행 파일 : 신호등.xpd
-            - 압축 폴더 : HMI.xpd..zip
+            - 압축 폴더 : HMI.xpd.zip
             - 구동 프로그램 : XP-Builder
             
             ## PLC
             - 실행 파일 : 신호등.xgwx
-            - 압축 폴더 : PLC.xgwx..zip
+            - 압축 폴더 : PLC.xgwx.zip
             - 구동 프로그램 : XG-5000
           draft: false
           prerelease: false
