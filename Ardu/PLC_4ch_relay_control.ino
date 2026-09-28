@@ -1,5 +1,6 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
+#include <WebSocketsServer.h> // WebSockets by Markus Sattler 라이브러리 필요
 
 // ===== 사용자 설정 =====
 const char* ap_ssid = "ESP_Relay_Control";
@@ -12,6 +13,71 @@ const bool LOGIC_REVERSE = true; // true = ACTIVE LOW (LOW 신호로 릴레이 O
 // ===== 전역 변수 =====
 bool relayState[4] = {false, false, false, false};
 ESP8266WebServer server(80);
+WebSocketsServer webSocket = WebSocketsServer(81); // 81번 포트 사용
+
+// 모든 웹소켓 클라이언트에게 현재 릴레이 상태 브로드캐스트
+void broadcastRelayState() {
+  String json = "{\"states\":[";
+  for (int i = 0; i < 4; i++) {
+    if (i > 0) json += ",";
+    json += relayState[i] ? "true" : "false";
+  }
+  json += "]}";
+  
+  webSocket.broadcastTXT(json); // 연결된 모든 접속자에게 전송
+}
+
+// 웹소켓 이벤트 처리
+void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
+  switch (type) {
+    case WStype_DISCONNECTED:
+      Serial.printf("[%u] 접속 해제\n", num);
+      break;
+
+    case WStype_CONNECTED: {
+      IPAddress ip = webSocket.remoteIP(num);
+      Serial.printf("[%u] 새 접속자 연결됨 - IP: %d.%d.%d.%d\n", num, ip[0], ip[1], ip[2], ip[3]);
+      
+      // 새로 접속한 클라이언트에게 현재 상태 즉시 전달
+      String json = "{\"states\":[";
+      for (int i = 0; i < 4; i++) {
+        if (i > 0) json += ",";
+        json += relayState[i] ? "true" : "false";
+      }
+      json += "]}";
+      webSocket.sendTXT(num, json);
+      break;
+    }
+
+    case WStype_TEXT: {
+      // 명령 수신 예: "TOGGLE:0:1" (채널 0, ON) 또는 "TOGGLE:2:0" (채널 2, OFF)
+      String msg = String((char*)payload);
+      if (msg.startsWith("TOGGLE:")) {
+        int firstColon = msg.indexOf(':');
+        int secondColon = msg.indexOf(':', firstColon + 1);
+        
+        int channel = msg.substring(firstColon + 1, secondColon).toInt();
+        int state = msg.substring(secondColon + 1).toInt();
+
+        if (channel >= 0 && channel < 4) {
+          bool relayOn = (state == 1);
+          int outputLevel = LOGIC_REVERSE ? (relayOn ? LOW : HIGH) : (relayOn ? HIGH : LOW);
+
+          digitalWrite(relayPins[channel], outputLevel);
+          relayState[channel] = relayOn;
+
+          Serial.printf("명령 수신 [%u] -> 채널 %d: %s\n", num, channel + 1, relayOn ? "ON" : "OFF");
+
+          // 상태가 변경되었으므로 모든 접속자에게 변경 사항 즉시 동기화
+          broadcastRelayState();
+        }
+      }
+      break;
+    }
+    default:
+      break;
+  }
+}
 
 // HTML 페이지 생성
 String buildHTML() {
@@ -21,11 +87,14 @@ String buildHTML() {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>4채널 릴레이 제어판</title>
+  <title>4채널 실시간 릴레이 제어판</title>
   <style>
     body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f5f5; margin: 0; padding: 20px; }
     .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); padding: 20px; }
     h1 { color: #333; text-align: center; }
+    .connection-status { text-align: center; font-size: 13px; margin-bottom: 15px; padding: 5px; border-radius: 4px; }
+    .online { background-color: #e2f0d9; color: #385723; }
+    .offline { background-color: #fce4d6; color: #c65911; }
     .relay-channel { margin: 15px 0; padding: 15px; border: 1px solid #eee; border-radius: 8px; background-color: #fafafa; }
     .channel-label { font-weight: bold; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
     .status { padding: 4px 8px; border-radius: 4px; font-size: 14px; font-weight: bold; }
@@ -40,7 +109,8 @@ String buildHTML() {
 </head>
 <body>
   <div class="container">
-    <h1>4채널 릴레이 제어판</h1>
+    <h1>4채널 실시간 릴레이 제어판</h1>
+    <div id="ws-status" class="connection-status offline">웹소켓 연결 중...</div>
 )rawliteral";
 
   for (int i = 0; i < 4; i++) {
@@ -58,32 +128,25 @@ String buildHTML() {
   html += R"rawliteral(
     <div class="info">
       WiFi AP: ESP_Relay_Control<br>
-      IP 주소: 192.168.4.1<br>
+      IP 주소: 192.168.4.1
     </div>
   </div>
   <script>
-    let pollingInterval = null;
-    
-    function toggleRelay(channel, state) {
-      // 캐시 방지를 위해 타임스탬프(t) 추가
-      fetch('/relay?channel=' + channel + '&state=' + state + '&t=' + new Date().getTime())
-        .then(response => {
-          if (response.ok) {
-            // 상태 업데이트는 polling을 통해 처리
-          } else {
-            alert('제어 명령 전송 실패');
-          }
-        })
-        .catch(err => {
-          console.error(err);
-          alert('통신 오류가 발생했습니다.');
-        });
-    }
-    
-    function updateStatus() {
-      fetch('/status?t=' + new Date().getTime())
-        .then(response => response.json())
-        .then(data => {
+    let ws;
+
+    function initWebSocket() {
+      // 81번 포트로 웹소켓 연결
+      ws = new WebSocket('ws://' + window.location.hostname + ':81/');
+
+      ws.onopen = function() {
+        const wsStatus = document.getElementById('ws-status');
+        wsStatus.textContent = '실시간 동기화 연결됨';
+        wsStatus.className = 'connection-status online';
+      };
+
+      ws.onmessage = function(event) {
+        try {
+          const data = JSON.parse(event.data);
           if (data && data.states) {
             data.states.forEach((state, index) => {
               const statusEl = document.getElementById('status-' + index);
@@ -97,23 +160,36 @@ String buildHTML() {
               }
             });
           }
-        })
-        .catch(err => {
-          console.error('상태 업데이트 오류:', err);
-        });
+        } catch (e) {
+          console.error("데이터 파싱 오류", e);
+        }
+      };
+
+      ws.onclose = function() {
+        const wsStatus = document.getElementById('ws-status');
+        wsStatus.textContent = '연결 끊김 - 재연결 시도 중...';
+        wsStatus.className = 'connection-status offline';
+        // 끊겼을 때 2초 후 자동 재연결
+        setTimeout(initWebSocket, 2000);
+      };
+
+      ws.onerror = function(err) {
+        console.error('웹소켓 에러:', err);
+        ws.close();
+      };
     }
-    
-    // 페이지 로드 시 polling 시작
-    window.onload = function() {
-      updateStatus(); // 초기 상태 즉시 업데이트
-      pollingInterval = setInterval(updateStatus, 1000); // 1초마다 업데이트
-    };
-    
-    // 페이지 언로드 시 polling 중지
-    window.onunload = function() {
-      if (pollingInterval) {
-        clearInterval(pollingInterval);
+
+    function toggleRelay(channel, state) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        // 웹소켓으로 제어 명령 전송
+        ws.send('TOGGLE:' + channel + ':' + state);
+      } else {
+        alert('서버와 연결되어 있지 않습니다.');
       }
+    }
+
+    window.onload = function() {
+      initWebSocket();
     };
   </script>
 </body>
@@ -125,38 +201,6 @@ String buildHTML() {
 
 void handleRoot() {
   server.send(200, "text/html", buildHTML());
-}
-
-void handleRelay() {
-  if (server.hasArg("channel") && server.hasArg("state")) {
-    int channel = server.arg("channel").toInt();
-    int state = server.arg("state").toInt();
-
-    if (channel >= 0 && channel < 4) {
-      bool relayOn = (state == 1);
-      int outputLevel = LOGIC_REVERSE ? (relayOn ? LOW : HIGH) : (relayOn ? HIGH : LOW);
-
-      digitalWrite(relayPins[channel], outputLevel);
-      relayState[channel] = relayOn;
-
-      Serial.printf("채널 %d: %s (핀: %d, 출력: %d)\n",
-                    channel + 1, relayOn ? "ON" : "OFF", relayPins[channel], outputLevel);
-    }
-  }
-  // AJAX 요청에 대해 200 OK 응답 반환
-  server.send(200, "text/plain", "OK");
-}
-
-// 상태 정보 제공 엔드포인트
-void handleStatus() {
-  String json = "{";
-  json += "\"states\":[";
-  for (int i = 0; i < 4; i++) {
-    if (i > 0) json += ",";
-    json += relayState[i] ? "true" : "false";
-  }
-  json += "]}";
-  server.send(200, "application/json", json);
 }
 
 void handleNotFound() {
@@ -183,15 +227,19 @@ void setup() {
   Serial.print(", IP: ");
   Serial.println(apIP);
 
+  // HTTP 웹서버 (포트 80)
   server.on("/", handleRoot);
-  server.on("/relay", HTTP_GET, handleRelay);
-  server.on("/status", HTTP_GET, handleStatus);
   server.onNotFound(handleNotFound);
-
   server.begin();
-  Serial.println("HTTP 서버 시작됨");
+
+  // 웹소켓 서버 시작 (포트 81)
+  webSocket.begin();
+  webSocket.onEvent(webSocketEvent);
+
+  Serial.println("HTTP 및 WebSocket 서버 준비 완료");
 }
 
 void loop() {
-  server.handleClient();
+  server.handleClient();  // HTTP 요청 처리
+  webSocket.loop();       // 웹소켓 이벤트 처리
 }
