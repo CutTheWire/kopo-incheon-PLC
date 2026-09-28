@@ -1,6 +1,6 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266WebServer.h>
-#include <WebSocketsServer.h> // WebSockets by Markus Sattler 라이브러리 필요
+#include <WebSocketsServer.h>
 
 // ===== 사용자 설정 =====
 const char* ap_ssid = "ESP_Relay_Control";
@@ -12,8 +12,9 @@ const bool LOGIC_REVERSE = true; // true = ACTIVE LOW (LOW 신호로 릴레이 O
 
 // ===== 전역 변수 =====
 bool relayState[4] = {false, false, false, false};
+
 ESP8266WebServer server(80);
-WebSocketsServer webSocket = WebSocketsServer(81); // 81번 포트 사용
+WebSocketsServer webSocket = WebSocketsServer(81);
 
 // 모든 웹소켓 클라이언트에게 현재 릴레이 상태 브로드캐스트
 void broadcastRelayState() {
@@ -23,8 +24,8 @@ void broadcastRelayState() {
     json += relayState[i] ? "true" : "false";
   }
   json += "]}";
-  
-  webSocket.broadcastTXT(json); // 연결된 모든 접속자에게 전송
+
+  webSocket.broadcastTXT(json);
 }
 
 // 웹소켓 이벤트 처리
@@ -38,20 +39,15 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
       IPAddress ip = webSocket.remoteIP(num);
       Serial.printf("[%u] 새 접속자 연결됨 - IP: %d.%d.%d.%d\n", num, ip[0], ip[1], ip[2], ip[3]);
       
-      // 새로 접속한 클라이언트에게 현재 상태 즉시 전달
-      String json = "{\"states\":[";
-      for (int i = 0; i < 4; i++) {
-        if (i > 0) json += ",";
-        json += relayState[i] ? "true" : "false";
-      }
-      json += "]}";
-      webSocket.sendTXT(num, json);
+      // 접속 시 최신 상태 브로드캐스트
+      broadcastRelayState();
       break;
     }
 
     case WStype_TEXT: {
-      // 명령 수신 예: "TOGGLE:0:1" (채널 0, ON) 또는 "TOGGLE:2:0" (채널 2, OFF)
       String msg = String((char*)payload);
+      
+      // 릴레이 제어 명령 ("TOGGLE:채널:상태")
       if (msg.startsWith("TOGGLE:")) {
         int firstColon = msg.indexOf(':');
         int secondColon = msg.indexOf(':', firstColon + 1);
@@ -66,9 +62,7 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
           digitalWrite(relayPins[channel], outputLevel);
           relayState[channel] = relayOn;
 
-          Serial.printf("명령 수신 [%u] -> 채널 %d: %s\n", num, channel + 1, relayOn ? "ON" : "OFF");
-
-          // 상태가 변경되었으므로 모든 접속자에게 변경 사항 즉시 동기화
+          Serial.printf("제어 [%u] -> 채널 %d: %s\n", num, channel + 1, relayOn ? "ON" : "OFF");
           broadcastRelayState();
         }
       }
@@ -79,63 +73,79 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t * payload, size_t length
   }
 }
 
-// HTML 페이지 생성
 String buildHTML() {
   String html = R"rawliteral(
 <!DOCTYPE html>
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>4채널 실시간 릴레이 제어판</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>4채널 릴레이 제어판</title>
   <style>
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f5f5; margin: 0; padding: 20px; }
+    * { -webkit-tap-highlight-color: transparent; user-select: none; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f5f5f5; margin: 0; padding: 15px; }
     .container { max-width: 600px; margin: 0 auto; background: white; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); padding: 20px; }
-    h1 { color: #333; text-align: center; }
-    .connection-status { text-align: center; font-size: 13px; margin-bottom: 15px; padding: 5px; border-radius: 4px; }
+    h1 { color: #333; text-align: center; margin-top: 0; margin-bottom: 5px; }
+    .connection-status { text-align: center; font-size: 13px; margin-bottom: 15px; padding: 6px; border-radius: 4px; }
     .online { background-color: #e2f0d9; color: #385723; }
     .offline { background-color: #fce4d6; color: #c65911; }
+    
     .relay-channel { margin: 15px 0; padding: 15px; border: 1px solid #eee; border-radius: 8px; background-color: #fafafa; }
-    .channel-label { font-weight: bold; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
-    .status { padding: 4px 8px; border-radius: 4px; font-size: 14px; font-weight: bold; }
-    .status.on { background-color: #d4edda; color: #155724; }
-    .status.off { background-color: #f8d7da; color: #721c24; }
-    .button { display: inline-block; width: 100%; padding: 12px; margin: 5px 0; font-size: 16px; border: none; border-radius: 6px; cursor: pointer; transition: all 0.2s ease; }
-    .button.on { background-color: #28a745; color: white; }
-    .button.off { background-color: #dc3545; color: white; }
-    .button:active { transform: scale(0.98); }
-    .info { margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee; font-size: 14px; color: #666; text-align: center; }
+    .channel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+    .channel-title { font-weight: bold; font-size: 16px; color: #222; }
+    .status-badge { padding: 4px 10px; border-radius: 4px; font-size: 13px; font-weight: bold; }
+    .status-badge.on { background-color: #d4edda; color: #155724; }
+    .status-badge.off { background-color: #f8d7da; color: #721c24; }
+    
+    /* 2열 가로 배치 버튼 그룹 */
+    .btn-row { display: flex; gap: 10px; }
+    .btn { flex: 1; padding: 14px 5px; font-size: 15px; font-weight: bold; border: none; border-radius: 6px; cursor: pointer; transition: all 0.1s ease; text-align: center; touch-action: none; }
+    
+    /* 푸시 버튼 스타일 */
+    .btn-push { background-color: #007bff; color: white; }
+    .btn-push:active, .btn-push.active { background-color: #004494; transform: scale(0.97); }
+    
+    /* 토글 스위치 버튼 스타일 */
+    .btn-toggle.off { background-color: #28a745; color: white; }
+    .btn-toggle.on { background-color: #dc3545; color: white; }
+    .btn-toggle:active { transform: scale(0.97); }
+
+    .info { margin-top: 20px; padding-top: 15px; border-top: 1px solid #eee; font-size: 13px; color: #666; text-align: center; }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>4채널 실시간 릴레이 제어판</h1>
+    <h1>4채널 릴레이 제어판</h1>
     <div id="ws-status" class="connection-status offline">웹소켓 연결 중...</div>
 )rawliteral";
 
   for (int i = 0; i < 4; i++) {
     html += "<div class='relay-channel'>";
-    html += "<div class='channel-label'>";
-    html += "<span>채널 " + String(i + 1) + "</span>";
-    html += "<span class='status " + String(relayState[i] ? "on" : "off") + "' id='status-" + String(i) + "'>" + String(relayState[i] ? "ON" : "OFF") + "</span>";
+    html += "<div class='channel-header'>";
+    html += "<span class='channel-title'>채널 " + String(i + 1) + "</span>";
+    html += "<span class='status-badge off' id='status-" + String(i) + "'>OFF</span>";
     html += "</div>";
-    html += "<button class='button " + String(relayState[i] ? "off" : "on") + "' id='btn-" + String(i) + "' onclick='toggleRelay(" + String(i) + ", " + String(relayState[i] ? 0 : 1) + ")'>";
-    html += (relayState[i] ? "끄기" : "켜기");
-    html += "</button>";
+
+    // 가로 2열 버튼 영역 (푸시버튼 | 스위치)
+    html += "<div class='btn-row'>";
+    html += "<button class='btn btn-push' id='push-btn-" + String(i) + "'>푸시 (누를 때만 ON)</button>";
+    html += "<button class='btn btn-toggle off' id='toggle-btn-" + String(i) + "' onclick='handleToggleClick(" + String(i) + ")'>스위치 켜기</button>";
+    html += "</div>";
+
     html += "</div>";
   }
 
   html += R"rawliteral(
     <div class="info">
-      WiFi AP: ESP_Relay_Control<br>
-      IP 주소: 192.168.4.1
+      WiFi AP: ESP_Relay_Control | IP 주소: 192.168.4.1
     </div>
   </div>
+
   <script>
     let ws;
+    let currentStates = [false, false, false, false];
 
     function initWebSocket() {
-      // 81번 포트로 웹소켓 연결
       ws = new WebSocket('ws://' + window.location.hostname + ':81/');
 
       ws.onopen = function() {
@@ -148,17 +158,8 @@ String buildHTML() {
         try {
           const data = JSON.parse(event.data);
           if (data && data.states) {
-            data.states.forEach((state, index) => {
-              const statusEl = document.getElementById('status-' + index);
-              const btnEl = document.getElementById('btn-' + index);
-              if (statusEl && btnEl) {
-                statusEl.textContent = state ? 'ON' : 'OFF';
-                statusEl.className = 'status ' + (state ? 'on' : 'off');
-                btnEl.className = 'button ' + (state ? 'off' : 'on');
-                btnEl.textContent = state ? '끄기' : '켜기';
-                btnEl.setAttribute('onclick', 'toggleRelay(' + index + ', ' + (state ? 0 : 1) + ')');
-              }
-            });
+            currentStates = data.states;
+            renderUI();
           }
         } catch (e) {
           console.error("데이터 파싱 오류", e);
@@ -169,7 +170,6 @@ String buildHTML() {
         const wsStatus = document.getElementById('ws-status');
         wsStatus.textContent = '연결 끊김 - 재연결 시도 중...';
         wsStatus.className = 'connection-status offline';
-        // 끊겼을 때 2초 후 자동 재연결
         setTimeout(initWebSocket, 2000);
       };
 
@@ -179,17 +179,77 @@ String buildHTML() {
       };
     }
 
-    function toggleRelay(channel, state) {
+    // UI 상태 업데이트 (DOM 재생성 없이 기존 엘리먼트 속성만 변경하여 이벤트 유실 방지)
+    function renderUI() {
+      for (let i = 0; i < 4; i++) {
+        const state = currentStates[i];
+
+        // 1. 상태 바지 업데이트
+        const statusBadge = document.getElementById('status-' + i);
+        if (statusBadge) {
+          statusBadge.textContent = state ? 'ON' : 'OFF';
+          statusBadge.className = 'status-badge ' + (state ? 'on' : 'off');
+        }
+
+        // 2. 토글 스위치 버튼 업데이트
+        const toggleBtn = document.getElementById('toggle-btn-' + i);
+        if (toggleBtn) {
+          toggleBtn.textContent = state ? '스위치 끄기' : '스위치 켜기';
+          toggleBtn.className = 'btn btn-toggle ' + (state ? 'on' : 'off');
+        }
+      }
+    }
+
+    // 서버로 제어 명령 전송
+    function sendToggle(channel, state) {
       if (ws && ws.readyState === WebSocket.OPEN) {
-        // 웹소켓으로 제어 명령 전송
         ws.send('TOGGLE:' + channel + ':' + state);
-      } else {
-        alert('서버와 연결되어 있지 않습니다.');
+      }
+    }
+
+    // 스위치 버튼 클릭 핸들러 (ON -> OFF / OFF -> ON 토글)
+    function handleToggleClick(channel) {
+      const currentState = currentStates[channel];
+      sendToggle(channel, currentState ? 0 : 1);
+    }
+
+    // 푸시버튼 이벤트 바인딩 (Pointer Events 사용으로 떼기 누락 완전 방지)
+    function bindPushEvents() {
+      for (let i = 0; i < 4; i++) {
+        const btn = document.getElementById('push-btn-' + i);
+        if (!btn) continue;
+
+        let isPressed = false;
+
+        const handlePress = (e) => {
+          e.preventDefault();
+          if (!isPressed) {
+            isPressed = true;
+            try { btn.setPointerCapture(e.pointerId); } catch(err) {}
+            btn.classList.add('active');
+            sendToggle(i, 1);
+          }
+        };
+
+        const handleRelease = (e) => {
+          e.preventDefault();
+          if (isPressed) {
+            isPressed = false;
+            try { btn.releasePointerCapture(e.pointerId); } catch(err) {}
+            btn.classList.remove('active');
+            sendToggle(i, 0);
+          }
+        };
+
+        btn.onpointerdown = handlePress;
+        btn.onpointerup = handleRelease;
+        btn.onpointercancel = handleRelease; // 터치 취소, 바깥 이탈 등 모든 예외 상황 대응
       }
     }
 
     window.onload = function() {
       initWebSocket();
+      bindPushEvents();
     };
   </script>
 </body>
@@ -227,12 +287,10 @@ void setup() {
   Serial.print(", IP: ");
   Serial.println(apIP);
 
-  // HTTP 웹서버 (포트 80)
   server.on("/", handleRoot);
   server.onNotFound(handleNotFound);
   server.begin();
 
-  // 웹소켓 서버 시작 (포트 81)
   webSocket.begin();
   webSocket.onEvent(webSocketEvent);
 
@@ -240,6 +298,6 @@ void setup() {
 }
 
 void loop() {
-  server.handleClient();  // HTTP 요청 처리
-  webSocket.loop();       // 웹소켓 이벤트 처리
+  server.handleClient();
+  webSocket.loop();
 }
