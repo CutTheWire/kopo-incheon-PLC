@@ -2,7 +2,7 @@
 > 사거리 신호등 제어
 
 ## 실행 파일 위치 
-[![](IMG\plc_download_banner.png)](https://github.com/CutTheWire/kopo-incheon--PLC/releases)
+[![](https://github.com/CutTheWire/kopo-incheon-PLC/blob/main/IMG/plc_download_banner.png)](https://github.com/CutTheWire/kopo-incheon--PLC/releases)
 
 ## 주의 사항
 - 해당 리포지토리는 .xpd와 .xgwx를 저장하는 저장소로, Git Branch 개발 방식에 의거한 git push를 금지한다.
