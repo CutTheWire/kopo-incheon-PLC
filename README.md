@@ -14,7 +14,7 @@
   - [다운로드 링크](https://sftpssqblobcdn.blob.core.windows.net/prod/largefile/document/17709456440910/XP-Builder_V3.90.1817.exe)
 
 ### Hardware
-- PLC : 미정 (추후 예정, CPU XGB 시리즈)
+- PLC : [XBC-DR32H](https://www.ls-electric.com/ko/product/view/P01118)
 - HMI
   - 시리즈 : IPC Series(wXP)
   - 모델 : PC/AT
