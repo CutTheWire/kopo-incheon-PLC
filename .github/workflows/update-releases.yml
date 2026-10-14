@@ -34,7 +34,7 @@ jobs:
             
             ## HMI
             - 실행 파일 : 신호등.xpd
-            - 압축 폴더 : HMI(V1).zip
+            - 압축 폴더 : HMI(V1.1).zip
             - 구동 프로그램 : XP-Builder
             
             ## PLC
@@ -46,11 +46,11 @@ jobs:
 
       - name: Create and upload HMI zip file
         run: |
-          if [ -f "HMI/V1/신호등.xpd" ]; then
-            cd HMI/V1
-            zip -r "HMI(V1).zip" 신호등.osts 신호등.xpd
+          if [ -f "HMI/V1.1/신호등.xpd" ]; then
+            cd HMI/V1.1
+            zip -r "HMI(V1.1).zip" 신호등.osts 신호등.xpd
             cd ../..
-            gh release upload ${{ steps.tag.outputs.version }} "HMI/V1/HMI(V1).zip"
+            gh release upload ${{ steps.tag.outputs.version }} "HMI/V1.1/HMI(V1.1).zip"
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
