@@ -39,7 +39,7 @@ jobs:
             
             ## PLC
             - 실행 파일 : 신호등.xgwx
-            - 압축 폴더 : PLC(V1).zip
+            - 압축 폴더 : PLC(V1.1).zip
             - 구동 프로그램 : XG-5000
           draft: false
           prerelease: false
@@ -58,11 +58,11 @@ jobs:
 
       - name: Create and upload PLC zip file
         run: |
-          if [ -f "PLC/V1/신호등.xgwx" ]; then
-            cd PLC/V1
-            zip -r "PLC(V1).zip" 신호등.state 신호등.xgwx
+          if [ -f "PLC/V1.1/신호등.xgwx" ]; then
+            cd PLC/V1.1
+            zip -r "PLC(V1.1).zip" 신호등.state 신호등.xgwx
             cd ../..
-            gh release upload ${{ steps.tag.outputs.version }} "PLC/V1/PLC(V1).zip"
+            gh release upload ${{ steps.tag.outputs.version }} "PLC/V1/PLC(V1.1).zip"
           fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
